@@ -6,3 +6,4 @@ aiohttp
 Pillow
 PyNaCl
 edge-tts
+duckduckgo-search

@@ -329,7 +329,7 @@ async def on_message(message):
                     # 4. Ping Groq's high-speed vision model
                     chat_completion = await groq_client.chat.completions.create(
                         messages=messages,
-                        model="llama-3.2-90b-vision-preview",
+                        model="qwen/qwen3.8-27b",
                     )
                     
                     response_text = chat_completion.choices[0].message.content

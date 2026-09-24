@@ -292,14 +292,20 @@ async def on_message(message):
     current_brain = settings["brain"]
     current_persona = settings["persona"]
 
-    # Smart Auto-Switch Vision
+   # Smart Auto-Switch Vision
     if is_mentioned and message.attachments:
         attachment = message.attachments[0]
         if any(attachment.filename.lower().endswith(ext) for ext in ['png', 'jpg', 'jpeg', 'webp']):
             async with message.channel.typing():
                 try:
+                    # 1. Read bytes directly (No PIL needed)
                     image_bytes = await attachment.read()
-                    img_data = PIL.Image.open(io.BytesIO(image_bytes))
+                    
+                    # 2. Package it safely for Gemini to avoid the ResourceWarning
+                    image_part = types.Part.from_bytes(
+                        data=image_bytes, 
+                        mime_type=attachment.content_type or "image/jpeg"
+                    )
                     
                     prompt = message.content.replace(f'<@{bot.user.id}>', '').replace('larvis', '').replace('Larvis', '').strip()
                     if not prompt:
@@ -307,9 +313,10 @@ async def on_message(message):
 
                     current_system_prompt = PERSONAS.get(current_persona, PERSONAS["default"])
                     
+                    # 3. Use the correct, stable vision model name
                     response = await gemini_client.aio.models.generate_content(
-                        model='gemini-3.6-flash',
-                        contents=[prompt, img_data],
+                        model='gemini-1.5-flash',
+                        contents=[prompt, image_part],
                         config=types.GenerateContentConfig(
                             system_instruction=current_system_prompt
                         )
@@ -320,7 +327,8 @@ async def on_message(message):
                         await speak_text(message.guild, response.text)
                         
                 except Exception as e:
-                    await message.reply(f"❌ **Vision Error:** Failed to process visual data feed.")
+                    # Added the error variable {e} so if it fails again, it tells you EXACTLY why in Discord
+                    await message.reply(f"❌ **Vision Error:** Failed to process visual data feed. Log: {e}")
             return
 
     # Dual-Brain Chat 

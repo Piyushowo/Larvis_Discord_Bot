@@ -1,10 +1,9 @@
-import discord, os, sqlite3, urllib.parse, asyncio, io, aiohttp, re
+import discord, os, sqlite3, urllib.parse, asyncio, io, aiohttp, re, base64
 from discord.ext import commands
 from google import genai
 from google.genai import types
 from groq import AsyncGroq
 from dotenv import load_dotenv
-import PIL.Image
 import edge_tts
 from duckduckgo_search import DDGS
 
@@ -292,43 +291,55 @@ async def on_message(message):
     current_brain = settings["brain"]
     current_persona = settings["persona"]
 
-    # Smart Auto-Switch Vision
+    # Smart Auto-Switch Vision (Groq-Powered)
     if is_mentioned and message.attachments:
         attachment = message.attachments[0]
         if any(attachment.filename.lower().endswith(ext) for ext in ['png', 'jpg', 'jpeg', 'webp']):
             async with message.channel.typing():
                 try:
-                    # 1. Read bytes directly (No PIL needed)
+                    # 1. Read bytes and encode to base64
                     image_bytes = await attachment.read()
+                    base64_image = base64.b64encode(image_bytes).decode('utf-8')
+                    mime_type = attachment.content_type or "image/jpeg"
                     
-                    # 2. Package it safely for Gemini to avoid the ResourceWarning
-                    image_part = types.Part.from_bytes(
-                        data=image_bytes, 
-                        mime_type=attachment.content_type or "image/jpeg"
-                    )
-                    
+                    # 2. Clean the prompt
                     prompt = message.content.replace(f'<@{bot.user.id}>', '').replace('larvis', '').replace('Larvis', '').strip()
                     if not prompt:
                         prompt = "Running visual diagnostics. Please summarize the contents of this image."
 
                     current_system_prompt = PERSONAS.get(current_persona, PERSONAS["default"])
                     
-                    # 3. Use the correct, stable vision model name
-                    response = await gemini_client.aio.models.generate_content(
-                        model='gemini-3.6-flash',
-                        contents=[prompt, image_part],
-                        config=types.GenerateContentConfig(
-                            system_instruction=current_system_prompt
-                        )
+                    # 3. Format the payload for Groq Vision
+                    messages = [
+                        {"role": "system", "content": current_system_prompt},
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "text", "text": prompt},
+                                {
+                                    "type": "image_url",
+                                    "image_url": {
+                                        "url": f"data:{mime_type};base64,{base64_image}"
+                                    }
+                                }
+                            ]
+                        }
+                    ]
+                    
+                    # 4. Ping Groq's high-speed vision model
+                    chat_completion = await groq_client.chat.completions.create(
+                        messages=messages,
+                        model="llama-3.2-90b-vision-preview",
                     )
-                    await message.reply(response.text)
+                    
+                    response_text = chat_completion.choices[0].message.content
+                    await message.reply(response_text)
                     
                     if message.guild and message.guild.voice_client:
-                        await speak_text(message.guild, response.text)
+                        await speak_text(message.guild, response_text)
                         
                 except Exception as e:
-                    # Added the error variable {e} so if it fails again, it tells you EXACTLY why in Discord
-                    await message.reply(f"❌ **Vision Error:** Failed to process visual data feed. Log: {e}")
+                    await message.reply(f"❌ **Vision Error:** Failed to process visual data via Groq mainframe. Log: {e}")
             return
 
     # Dual-Brain Chat 

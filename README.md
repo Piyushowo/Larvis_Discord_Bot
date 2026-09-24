@@ -2,6 +2,8 @@
 
 Larvis is a high-performance, production-ready Discord companion modeled after the MCU's J.A.R.V.I.S. It features a dual-brain architecture routing between Groq (for ultra-fast conversational speed) and Google Gemini (for deep reasoning and computer vision). Larvis operates completely autonomously across multiple servers, offering persistent local memory, real-time web search, AI art generation, and high-fidelity voice synthesis.
 
+<img width="1254" height="1254" alt="ChatGPT Image Sep 24, 2026, 04_33_42 PM" src="https://github.com/user-attachments/assets/734ae33d-999b-4348-a1e7-9b5ff68d632f" />
+
 
 **Core Features**
 

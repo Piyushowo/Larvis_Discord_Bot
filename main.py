@@ -6,6 +6,7 @@ from groq import AsyncGroq
 from dotenv import load_dotenv
 import PIL.Image
 import edge_tts
+from duckduckgo_search import DDGS
 
 # 1. Load Secrets
 load_dotenv()
@@ -21,7 +22,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# 4. Global Personas
+# 4. Global Personas (MCU J.A.R.V.I.S. Default)
 PERSONAS = {
     "default": (
         "You are Larvis, a highly advanced artificial intelligence system modeled directly after J.A.R.V.I.S. from the MCU. "
@@ -84,21 +85,32 @@ async def save_memory(user_id, role, text):
         db.execute("INSERT INTO history VALUES (?, ?, ?)", (user_id, role, text))
         db.commit()
 
+# --- Web Search Helper ---
+def perform_web_search(query, max_results=3):
+    """Scrapes the live internet silently using DuckDuckGo"""
+    try:
+        with DDGS() as ddgs:
+            results = list(ddgs.text(query, max_results=max_results))
+            if not results:
+                return "I was unable to locate any relevant data on the global network regarding this query."
+            
+            formatted_results = "\n\n".join([f"Title: {res['title']}\nSummary: {res['body']}\nSource: {res['href']}" for res in results])
+            return formatted_results
+    except Exception as e:
+        return f"System error accessing external networks: {str(e)}"
+
 # --- Voice Synthesis Function ---
 async def speak_text(guild, text):
     if guild.voice_client and guild.voice_client.is_connected():
         if guild.voice_client.is_playing():
             guild.voice_client.stop()
             
-        # Clean the text for TTS (remove code blocks and heavy markdown)
         clean_tts = re.sub(r'```.*?```', ' I have provided the code in the chat. ', text, flags=re.DOTALL)
         clean_tts = re.sub(r'[*#_]', '', clean_tts)
         
-        # Limit TTS length so he doesn't speak for 5 minutes straight
         if len(clean_tts) > 500:
-             clean_tts = clean_tts[:500] + "... You can read the rest in the text channel."
+             clean_tts = clean_tts[:500] + "... You can read the rest in the text channel, sir."
              
-        # The Jarvis Voice Engine
         voice = "en-GB-RyanNeural" 
         file_path = f"larvis_speech_{guild.id}.mp3"
         
@@ -117,7 +129,7 @@ async def on_ready():
     except Exception as e:
         print(f"Failed to sync slash commands: {e}")
         
-    print(f'Success! {bot.user} is online and ready for Voice.')
+    print(f'Success! {bot.user} is online, connected to global networks, and ready for Voice.')
 
 # =====================================================
 # NATIVE SLASH COMMANDS (`/`)
@@ -134,6 +146,7 @@ async def slash_help(interaction: discord.Interaction):
         color=discord.Color.blurple()
     )
     embed.add_field(name="💬 Chat", value="Mention `@Larvis` or type `larvis`", inline=False)
+    embed.add_field(name="🌐 Live Search", value="`/search <query>` to access the live internet.", inline=False)
     embed.add_field(name="🎙️ Voice", value="`/join` to bring me to your VC, `/leave` to dismiss me.", inline=False)
     embed.add_field(name="🧠 Brain", value="`/brain <groq | gemini>`", inline=False)
     embed.add_field(name="🎭 Persona", value="`/persona <default | expert | creative | concise | sarcastic>`", inline=False)
@@ -142,22 +155,74 @@ async def slash_help(interaction: discord.Interaction):
     embed.set_footer(text=f"Server Brain: {settings['brain'].upper()} | Persona: {settings['persona'].upper()}")
     await interaction.response.send_message(embed=embed)
 
+@bot.tree.command(name="search", description="Access the global network for real-time information.")
+async def slash_search(interaction: discord.Interaction, query: str):
+    await interaction.response.defer()
+    
+    # 1. Fetch web results in a separate thread so the bot doesn't freeze
+    web_data = await asyncio.to_thread(perform_web_search, query)
+    
+    # 2. Get server settings
+    target_id = interaction.guild_id or interaction.user.id
+    settings = await get_guild_settings(target_id)
+    current_brain = settings["brain"]
+    current_persona = settings["persona"]
+    
+    # 3. Formulate the prompt instructing Larvis to use the web data
+    system_prompt = PERSONAS.get(current_persona, PERSONAS["default"])
+    search_prompt = (
+        f"The user has requested a live network search for: '{query}'.\n"
+        f"Here is the raw data I just pulled from the external servers:\n\n{web_data}\n\n"
+        f"Synthesize this data into a clear, intelligent answer in your persona."
+    )
+    
+    try:
+        if current_brain == "groq":
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": search_prompt}
+            ]
+            chat_completion = await groq_client.chat.completions.create(
+                messages=messages, model=groq_model_name
+            )
+            response_text = chat_completion.choices[0].message.content
+        else:  
+            response = await gemini_client.aio.models.generate_content(
+                model="gemini-3.6-flash",
+                contents=search_prompt,
+                config=types.GenerateContentConfig(system_instruction=system_prompt)
+            )
+            response_text = response.text
+
+        # 4. Save to memory so Larvis remembers the search context in normal chat later
+        await save_memory(str(interaction.user.id), "user", f"Search for: {query}")
+        await save_memory(str(interaction.user.id), "bot", response_text)
+        
+        await interaction.followup.send(response_text[:2000])
+        
+        # 5. Speak response if in Voice Channel
+        if interaction.guild and interaction.guild.voice_client:
+            await speak_text(interaction.guild, response_text)
+            
+    except Exception as e:
+        await interaction.followup.send(f"❌ Diagnostic Error: Failed to process network data. ({e})")
+
 @bot.tree.command(name="join", description="Bring Larvis into your current voice channel.")
 async def slash_join(interaction: discord.Interaction):
     if interaction.user.voice:
         channel = interaction.user.voice.channel
         await channel.connect()
-        await interaction.response.send_message(f"🎙️ Connected to **{channel.name}**. I will now read my responses aloud.")
+        await interaction.response.send_message(f"🎙️ Connected to **{channel.name}**. System diagnostic green; ready to vocalize output, sir.")
     else:
-        await interaction.response.send_message("❌ You must be in a voice channel first for me to join.")
+        await interaction.response.send_message("❌ I cannot connect. You must establish a presence in a voice channel first.")
 
 @bot.tree.command(name="leave", description="Disconnect Larvis from the voice channel.")
 async def slash_leave(interaction: discord.Interaction):
     if interaction.guild.voice_client:
         await interaction.guild.voice_client.disconnect()
-        await interaction.response.send_message("👋 Disconnected from voice.")
+        await interaction.response.send_message("👋 Terminating audio link. Good day, sir.")
     else:
-        await interaction.response.send_message("❌ I'm not currently in a voice channel.")
+        await interaction.response.send_message("❌ I am not currently transmitting to a voice channel.")
 
 @bot.tree.command(name="brain", description="Switch the active AI engine dynamically for this server.")
 @discord.app_commands.choices(engine=[
@@ -167,11 +232,11 @@ async def slash_leave(interaction: discord.Interaction):
 async def slash_brain(interaction: discord.Interaction, engine: str):
     target_id = interaction.guild_id or interaction.user.id
     await update_guild_settings(target_id, brain=engine)
-    await interaction.response.send_message(f"🧠 Server brain successfully switched to: **{engine.upper()}**")
+    await interaction.response.send_message(f"🧠 Mainframe successfully routed to: **{engine.upper()}**")
 
 @bot.tree.command(name="persona", description="Change Larvis's active personality for this server.")
 @discord.app_commands.choices(persona=[
-    discord.app_commands.Choice(name="Default (Balanced)", value="default"),
+    discord.app_commands.Choice(name="Default (J.A.R.V.I.S.)", value="default"),
     discord.app_commands.Choice(name="Expert (Technical & Detailed)", value="expert"),
     discord.app_commands.Choice(name="Creative (Storyteller)", value="creative"),
     discord.app_commands.Choice(name="Concise (Short & Direct)", value="concise"),
@@ -180,7 +245,7 @@ async def slash_brain(interaction: discord.Interaction, engine: str):
 async def slash_persona(interaction: discord.Interaction, persona: str):
     target_id = interaction.guild_id or interaction.user.id
     await update_guild_settings(target_id, persona=persona)
-    await interaction.response.send_message(f"🎭 **Server persona updated!** Larvis is now operating in **{persona.upper()}** mode here.")
+    await interaction.response.send_message(f"🎭 **Protocol updated.** Larvis is now operating in **{persona.upper()}** mode.")
 
 @bot.tree.command(name="image", description="Generate custom AI artwork from a description.")
 @discord.app_commands.choices(model=[
@@ -205,11 +270,11 @@ async def slash_image(interaction: discord.Interaction, prompt: str, model: str 
                         image_file = discord.File(io.BytesIO(data), filename=f"larvis_{model}.png")
                         await interaction.followup.send(file=image_file)
                     else:
-                        await interaction.followup.send("❌ The image server blocked the request.")
+                        await interaction.followup.send("❌ Render failed. The external image server blocked the request.")
                 else:
-                    await interaction.followup.send(f"❌ Image server returned an error (HTTP {resp.status}).")
+                    await interaction.followup.send(f"❌ Render failed. External server returned HTTP {resp.status}.")
     except Exception as e:
-        await interaction.followup.send("❌ Image generation timed out.")
+        await interaction.followup.send("❌ Render timed out. The data packet may have been too complex.")
 
 # =====================================================
 # MESSAGE HANDLERS (Chat & Smart Auto-Vision)
@@ -238,7 +303,7 @@ async def on_message(message):
                     
                     prompt = message.content.replace(f'<@{bot.user.id}>', '').replace('larvis', '').replace('Larvis', '').strip()
                     if not prompt:
-                        prompt = "Describe this image in detail."
+                        prompt = "Running visual diagnostics. Please summarize the contents of this image."
 
                     current_system_prompt = PERSONAS.get(current_persona, PERSONAS["default"])
                     
@@ -251,12 +316,11 @@ async def on_message(message):
                     )
                     await message.reply(response.text)
                     
-                    # Speak response if in Voice Channel
                     if message.guild and message.guild.voice_client:
                         await speak_text(message.guild, response.text)
                         
                 except Exception as e:
-                    await message.reply(f"❌ **Vision Error:** Failed to analyze the image.")
+                    await message.reply(f"❌ **Vision Error:** Failed to process visual data feed.")
             return
 
     # Dual-Brain Chat 
@@ -294,17 +358,15 @@ async def on_message(message):
                     )
                     response_text = response.text
 
-                # Save and Send
                 await save_memory(str(message.author.id), "user", clean_prompt)
                 await save_memory(str(message.author.id), "bot", response_text)
                 
                 await message.channel.send(response_text[:2000])
                 
-                # Speak response if in Voice Channel
                 if message.guild and message.guild.voice_client:
                     await speak_text(message.guild, response_text)
                 
             except Exception as e:
-                await message.channel.send(f"I'm having trouble thinking right now.")
+                await message.channel.send(f"Systems offline. The {current_brain.upper()} mainframe is currently unresponsive.")
 
 bot.run(os.getenv("DISCORD_TOKEN"))

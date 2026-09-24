@@ -188,7 +188,7 @@ async def slash_search(interaction: discord.Interaction, query: str):
             response_text = chat_completion.choices[0].message.content
         else:  
             response = await gemini_client.aio.models.generate_content(
-                model="gemini-2.5-flash",
+                model="gemini-3.6-flash",
                 contents=search_prompt,
                 config=types.GenerateContentConfig(system_instruction=system_prompt)
             )
@@ -315,7 +315,7 @@ async def on_message(message):
                     
                     # 3. Use the correct, stable vision model name
                     response = await gemini_client.aio.models.generate_content(
-                        model='gemini-2.5-flash',
+                        model='gemini-3.6-flash',
                         contents=[prompt, image_part],
                         config=types.GenerateContentConfig(
                             system_instruction=current_system_prompt
@@ -358,7 +358,7 @@ async def on_message(message):
                     history.append(types.Content(role="user", parts=[types.Part.from_text(text=clean_prompt)]))
                     
                     response = await gemini_client.aio.models.generate_content(
-                        model="gemini-2.5-flash",
+                        model="gemini-3.6-flash",
                         contents=history,
                         config=types.GenerateContentConfig(
                             system_instruction=current_system_prompt

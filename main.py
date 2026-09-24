@@ -1,10 +1,11 @@
-import discord, os, sqlite3, urllib.parse, asyncio, io, aiohttp
+import discord, os, sqlite3, urllib.parse, asyncio, io, aiohttp, re
 from discord.ext import commands
 from google import genai
 from google.genai import types
 from groq import AsyncGroq
 from dotenv import load_dotenv
 import PIL.Image
+import edge_tts
 
 # 1. Load Secrets
 load_dotenv()
@@ -42,7 +43,7 @@ async def get_guild_settings(guild_id):
         row = cursor.fetchone()
         if row:
             return {"brain": row[0], "persona": row[1]}
-        return {"brain": "groq", "persona": "default"} # Global default fallback
+        return {"brain": "groq", "persona": "default"} 
 
 async def update_guild_settings(guild_id, brain=None, persona=None):
     current = await get_guild_settings(guild_id)
@@ -63,7 +64,7 @@ async def get_memory(user_id, target_brain):
             if target_brain == "groq":
                 final_role = "assistant" if universal_role == "bot" else "user"
                 formatted_history.append({"role": final_role, "content": c})
-            else:  # Gemini
+            else:  
                 final_role = "model" if universal_role == "bot" else "user"
                 formatted_history.append(
                     types.Content(role=final_role, parts=[types.Part.from_text(text=c)])
@@ -75,6 +76,31 @@ async def save_memory(user_id, role, text):
         db.execute("INSERT INTO history VALUES (?, ?, ?)", (user_id, role, text))
         db.commit()
 
+# --- Voice Synthesis Function ---
+async def speak_text(guild, text):
+    if guild.voice_client and guild.voice_client.is_connected():
+        if guild.voice_client.is_playing():
+            guild.voice_client.stop()
+            
+        # Clean the text for TTS (remove code blocks and heavy markdown)
+        clean_tts = re.sub(r'```.*?```', ' I have provided the code in the chat. ', text, flags=re.DOTALL)
+        clean_tts = re.sub(r'[*#_]', '', clean_tts)
+        
+        # Limit TTS length so he doesn't speak for 5 minutes straight
+        if len(clean_tts) > 500:
+             clean_tts = clean_tts[:500] + "... You can read the rest in the text channel."
+             
+        # The Jarvis Voice Engine
+        voice = "en-GB-RyanNeural" 
+        file_path = f"larvis_speech_{guild.id}.mp3"
+        
+        communicate = edge_tts.Communicate(clean_tts, voice)
+        await communicate.save(file_path)
+        
+        audio_source = discord.FFmpegPCMAudio(file_path)
+        guild.voice_client.play(audio_source)
+
+
 @bot.event
 async def on_ready():
     try:
@@ -83,31 +109,47 @@ async def on_ready():
     except Exception as e:
         print(f"Failed to sync slash commands: {e}")
         
-    print(f'Success! {bot.user} is online and ready.')
+    print(f'Success! {bot.user} is online and ready for Voice.')
 
 # =====================================================
 # NATIVE SLASH COMMANDS (`/`)
 # =====================================================
 
-@bot.tree.command(name="help", description="Displays the Larvis AI command center and information guide.")
+@bot.tree.command(name="help", description="Displays the Larvis AI command center.")
 async def slash_help(interaction: discord.Interaction):
-    # Fetch settings specific to the server (or user if in DMs)
     target_id = interaction.guild_id or interaction.user.id
     settings = await get_guild_settings(target_id)
     
     embed = discord.Embed(
         title="🧠 Larvis AI — Command Center",
-        description="Mention me or just say **'larvis'** anytime in your message to chat!",
+        description="Mention me or say **'larvis'** in your message to chat!",
         color=discord.Color.blurple()
     )
-    embed.add_field(name="💬 Chat", value="Mention `@Larvis` or include `larvis` in your message", inline=False)
-    embed.add_field(name="🧠 Brain Switcher", value="`/brain <groq | gemini>`\n*Switch between fast responses and deep reasoning.*", inline=False)
-    embed.add_field(name="🎭 Persona Switcher", value="`/persona <default | expert | creative | concise | sarcastic>`", inline=False)
-    embed.add_field(name="🎨 Image Generation", value="`/image <prompt> [model]`\n*Generate custom AI artwork using multiple engines.*", inline=False)
-    embed.add_field(name="👁️ Vision Analysis", value="Attach an image and mention me — **automatically uses Gemini!**", inline=False)
+    embed.add_field(name="💬 Chat", value="Mention `@Larvis` or type `larvis`", inline=False)
+    embed.add_field(name="🎙️ Voice", value="`/join` to bring me to your VC, `/leave` to dismiss me.", inline=False)
+    embed.add_field(name="🧠 Brain", value="`/brain <groq | gemini>`", inline=False)
+    embed.add_field(name="🎭 Persona", value="`/persona <default | expert | creative | concise | sarcastic>`", inline=False)
+    embed.add_field(name="🎨 Image", value="`/image <prompt> [model]`", inline=False)
     
-    embed.set_footer(text=f"Server Brain: {settings['brain'].upper()} | Server Persona: {settings['persona'].upper()}")
+    embed.set_footer(text=f"Server Brain: {settings['brain'].upper()} | Persona: {settings['persona'].upper()}")
     await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="join", description="Bring Larvis into your current voice channel.")
+async def slash_join(interaction: discord.Interaction):
+    if interaction.user.voice:
+        channel = interaction.user.voice.channel
+        await channel.connect()
+        await interaction.response.send_message(f"🎙️ Connected to **{channel.name}**. I will now read my responses aloud.")
+    else:
+        await interaction.response.send_message("❌ You must be in a voice channel first for me to join.")
+
+@bot.tree.command(name="leave", description="Disconnect Larvis from the voice channel.")
+async def slash_leave(interaction: discord.Interaction):
+    if interaction.guild.voice_client:
+        await interaction.guild.voice_client.disconnect()
+        await interaction.response.send_message("👋 Disconnected from voice.")
+    else:
+        await interaction.response.send_message("❌ I'm not currently in a voice channel.")
 
 @bot.tree.command(name="brain", description="Switch the active AI engine dynamically for this server.")
 @discord.app_commands.choices(engine=[
@@ -146,10 +188,7 @@ async def slash_image(interaction: discord.Interaction, prompt: str, model: str 
     image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true&model={model}"
     
     try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        }
-        
+        headers = {"User-Agent": "Mozilla/5.0"}
         async with aiohttp.ClientSession(headers=headers) as session:
             async with session.get(image_url, timeout=45) as resp:
                 if resp.status == 200:
@@ -158,12 +197,11 @@ async def slash_image(interaction: discord.Interaction, prompt: str, model: str 
                         image_file = discord.File(io.BytesIO(data), filename=f"larvis_{model}.png")
                         await interaction.followup.send(file=image_file)
                     else:
-                        await interaction.followup.send("❌ The image server blocked the request. Try a different prompt.")
+                        await interaction.followup.send("❌ The image server blocked the request.")
                 else:
                     await interaction.followup.send(f"❌ Image server returned an error (HTTP {resp.status}).")
     except Exception as e:
-        await interaction.followup.send("❌ Image generation timed out. Try a slightly shorter prompt.")
-        print(f"Image Generation Error: {e}")
+        await interaction.followup.send("❌ Image generation timed out.")
 
 # =====================================================
 # MESSAGE HANDLERS (Chat & Smart Auto-Vision)
@@ -176,7 +214,6 @@ async def on_message(message):
 
     is_mentioned = bot.user.mentioned_in(message) or "larvis" in message.content.lower()
 
-    # Fetch this specific server's settings
     target_id = message.guild.id if message.guild else message.author.id
     settings = await get_guild_settings(target_id)
     current_brain = settings["brain"]
@@ -191,7 +228,6 @@ async def on_message(message):
                     image_bytes = await attachment.read()
                     img_data = PIL.Image.open(io.BytesIO(image_bytes))
                     
-                    # Clean prompt text
                     prompt = message.content.replace(f'<@{bot.user.id}>', '').replace('larvis', '').replace('Larvis', '').strip()
                     if not prompt:
                         prompt = "Describe this image in detail."
@@ -206,11 +242,16 @@ async def on_message(message):
                         )
                     )
                     await message.reply(response.text)
+                    
+                    # Speak response if in Voice Channel
+                    if message.guild and message.guild.voice_client:
+                        await speak_text(message.guild, response.text)
+                        
                 except Exception as e:
-                    await message.reply(f"❌ **Vision Error:** Failed to analyze the image. ({e})")
+                    await message.reply(f"❌ **Vision Error:** Failed to analyze the image.")
             return
 
-    # Dual-Brain Chat (Triggers on mention or keyword "larvis")
+    # Dual-Brain Chat 
     if is_mentioned:
         async with message.channel.typing():
             clean_prompt = message.content.replace(f'<@{bot.user.id}>', '').replace('larvis', '').replace('Larvis', '').strip()
@@ -232,7 +273,7 @@ async def on_message(message):
                     )
                     response_text = chat_completion.choices[0].message.content
                     
-                else:  # Gemini Route
+                else:  
                     history = await get_memory(str(message.author.id), "gemini")
                     history.append(types.Content(role="user", parts=[types.Part.from_text(text=clean_prompt)]))
                     
@@ -245,14 +286,17 @@ async def on_message(message):
                     )
                     response_text = response.text
 
-                # Save the new conversation
+                # Save and Send
                 await save_memory(str(message.author.id), "user", clean_prompt)
                 await save_memory(str(message.author.id), "bot", response_text)
                 
                 await message.channel.send(response_text[:2000])
                 
+                # Speak response if in Voice Channel
+                if message.guild and message.guild.voice_client:
+                    await speak_text(message.guild, response_text)
+                
             except Exception as e:
-                await message.channel.send(f"I'm having trouble thinking right now. ({current_brain.upper()} failed)")
-                print(f"Error ({current_brain}): {e}")
+                await message.channel.send(f"I'm having trouble thinking right now.")
 
 bot.run(os.getenv("DISCORD_TOKEN"))

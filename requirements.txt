@@ -6,4 +6,3 @@ aiohttp
 Pillow
 PyNaCl
 edge-tts
-FFmpeg

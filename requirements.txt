@@ -3,7 +3,6 @@ google-genai
 groq
 python-dotenv
 aiohttp
-Pillow
 PyNaCl
 edge-tts
 duckduckgo-search

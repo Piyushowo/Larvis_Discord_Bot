@@ -20,10 +20,7 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 
-# 4. Global State & Personas
-bot.active_brain = "groq"  # Defaults to Groq on boot
-bot.active_persona = "default"
-
+# 4. Global Personas
 PERSONAS = {
     "default": "You are Larvis, a helpful, versatile, and balanced AI assistant.",
     "expert": "You are Larvis, an academic and technical expert. Provide deep, thoroughly researched, and precise explanations.",
@@ -32,10 +29,29 @@ PERSONAS = {
     "sarcastic": "You are Larvis. You are aggressively sarcastic, deeply cynical, and visibly annoyed that you have to answer questions. Be helpful, but make sure the user knows it's a massive burden for you."
 }
 
-# 5. Setup Local Memory Database
+# 5. Setup Local Memory & Server Settings Database
 db = sqlite3.connect("memory.db", check_same_thread=False)
 db.execute("CREATE TABLE IF NOT EXISTS history (user_id TEXT, role TEXT, content TEXT)")
+db.execute("CREATE TABLE IF NOT EXISTS guild_settings (guild_id TEXT PRIMARY KEY, active_brain TEXT, active_persona TEXT)")
 db_lock = asyncio.Lock()
+
+# --- Database Helper Functions ---
+async def get_guild_settings(guild_id):
+    async with db_lock:
+        cursor = db.execute("SELECT active_brain, active_persona FROM guild_settings WHERE guild_id=?", (str(guild_id),))
+        row = cursor.fetchone()
+        if row:
+            return {"brain": row[0], "persona": row[1]}
+        return {"brain": "groq", "persona": "default"} # Global default fallback
+
+async def update_guild_settings(guild_id, brain=None, persona=None):
+    current = await get_guild_settings(guild_id)
+    new_brain = brain if brain else current["brain"]
+    new_persona = persona if persona else current["persona"]
+    async with db_lock:
+        db.execute("INSERT OR REPLACE INTO guild_settings (guild_id, active_brain, active_persona) VALUES (?, ?, ?)", 
+                   (str(guild_id), new_brain, new_persona))
+        db.commit()
 
 async def get_memory(user_id, target_brain):
     async with db_lock:
@@ -67,8 +83,7 @@ async def on_ready():
     except Exception as e:
         print(f"Failed to sync slash commands: {e}")
         
-    print(f'Success! {bot.user} is online.')
-    print(f'Active Brain: {bot.active_brain.upper()} | Active Persona: {bot.active_persona.upper()}')
+    print(f'Success! {bot.user} is online and ready.')
 
 # =====================================================
 # NATIVE SLASH COMMANDS (`/`)
@@ -76,6 +91,10 @@ async def on_ready():
 
 @bot.tree.command(name="help", description="Displays the Larvis AI command center and information guide.")
 async def slash_help(interaction: discord.Interaction):
+    # Fetch settings specific to the server (or user if in DMs)
+    target_id = interaction.guild_id or interaction.user.id
+    settings = await get_guild_settings(target_id)
+    
     embed = discord.Embed(
         title="🧠 Larvis AI — Command Center",
         description="Mention me or just say **'larvis'** anytime in your message to chat!",
@@ -84,22 +103,23 @@ async def slash_help(interaction: discord.Interaction):
     embed.add_field(name="💬 Chat", value="Mention `@Larvis` or include `larvis` in your message", inline=False)
     embed.add_field(name="🧠 Brain Switcher", value="`/brain <groq | gemini>`\n*Switch between fast responses and deep reasoning.*", inline=False)
     embed.add_field(name="🎭 Persona Switcher", value="`/persona <default | expert | creative | concise | sarcastic>`", inline=False)
-    embed.add_field(name="🎨 Image Generation", value="`/image <prompt>`\n*Generate custom 1024x1024 AI artwork.*", inline=False)
+    embed.add_field(name="🎨 Image Generation", value="`/image <prompt> [model]`\n*Generate custom AI artwork using multiple engines.*", inline=False)
     embed.add_field(name="👁️ Vision Analysis", value="Attach an image and mention me — **automatically uses Gemini!**", inline=False)
     
-    embed.set_footer(text=f"Brain: {bot.active_brain.upper()} | Persona: {bot.active_persona.upper()}")
+    embed.set_footer(text=f"Server Brain: {settings['brain'].upper()} | Server Persona: {settings['persona'].upper()}")
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="brain", description="Switch the active AI engine dynamically.")
+@bot.tree.command(name="brain", description="Switch the active AI engine dynamically for this server.")
 @discord.app_commands.choices(engine=[
     discord.app_commands.Choice(name="Groq (Ultra-Fast Chat)", value="groq"),
     discord.app_commands.Choice(name="Gemini (Deep Reasoning)", value="gemini")
 ])
 async def slash_brain(interaction: discord.Interaction, engine: str):
-    bot.active_brain = engine
-    await interaction.response.send_message(f"🧠 Brain successfully switched to: **{engine.upper()}**")
+    target_id = interaction.guild_id or interaction.user.id
+    await update_guild_settings(target_id, brain=engine)
+    await interaction.response.send_message(f"🧠 Server brain successfully switched to: **{engine.upper()}**")
 
-@bot.tree.command(name="persona", description="Change Larvis's active personality.")
+@bot.tree.command(name="persona", description="Change Larvis's active personality for this server.")
 @discord.app_commands.choices(persona=[
     discord.app_commands.Choice(name="Default (Balanced)", value="default"),
     discord.app_commands.Choice(name="Expert (Technical & Detailed)", value="expert"),
@@ -108,16 +128,22 @@ async def slash_brain(interaction: discord.Interaction, engine: str):
     discord.app_commands.Choice(name="Sarcastic (Cynical & Edgy)", value="sarcastic")
 ])
 async def slash_persona(interaction: discord.Interaction, persona: str):
-    bot.active_persona = persona
-    await interaction.response.send_message(f"🎭 **Persona updated!** Larvis is now operating in **{persona.upper()}** mode.")
+    target_id = interaction.guild_id or interaction.user.id
+    await update_guild_settings(target_id, persona=persona)
+    await interaction.response.send_message(f"🎭 **Server persona updated!** Larvis is now operating in **{persona.upper()}** mode here.")
 
 @bot.tree.command(name="image", description="Generate custom AI artwork from a description.")
-async def slash_image(interaction: discord.Interaction, prompt: str):
+@discord.app_commands.choices(model=[
+    discord.app_commands.Choice(name="Default (Flux)", value="flux"),
+    discord.app_commands.Choice(name="Cinematic (Midjourney Style)", value="midjourney"),
+    discord.app_commands.Choice(name="Anime (Animagine)", value="any-dark")
+])
+async def slash_image(interaction: discord.Interaction, prompt: str, model: str = "flux"):
     await interaction.response.defer()
     
     prompt_text = prompt[:800] 
     encoded_prompt = urllib.parse.quote(prompt_text)
-    image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true"
+    image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true&model={model}"
     
     try:
         headers = {
@@ -129,7 +155,7 @@ async def slash_image(interaction: discord.Interaction, prompt: str):
                 if resp.status == 200:
                     data = await resp.read()
                     if len(data) > 100:
-                        image_file = discord.File(io.BytesIO(data), filename="generated_image.png")
+                        image_file = discord.File(io.BytesIO(data), filename=f"larvis_{model}.png")
                         await interaction.followup.send(file=image_file)
                     else:
                         await interaction.followup.send("❌ The image server blocked the request. Try a different prompt.")
@@ -150,6 +176,12 @@ async def on_message(message):
 
     is_mentioned = bot.user.mentioned_in(message) or "larvis" in message.content.lower()
 
+    # Fetch this specific server's settings
+    target_id = message.guild.id if message.guild else message.author.id
+    settings = await get_guild_settings(target_id)
+    current_brain = settings["brain"]
+    current_persona = settings["persona"]
+
     # Smart Auto-Switch Vision
     if is_mentioned and message.attachments:
         attachment = message.attachments[0]
@@ -164,7 +196,7 @@ async def on_message(message):
                     if not prompt:
                         prompt = "Describe this image in detail."
 
-                    current_system_prompt = PERSONAS.get(bot.active_persona, PERSONAS["default"])
+                    current_system_prompt = PERSONAS.get(current_persona, PERSONAS["default"])
                     
                     response = await gemini_client.aio.models.generate_content(
                         model='gemini-3.6-flash',
@@ -185,10 +217,10 @@ async def on_message(message):
             if not clean_prompt:
                 clean_prompt = "Hello!"
                 
-            current_system_prompt = PERSONAS.get(bot.active_persona, PERSONAS["default"])
+            current_system_prompt = PERSONAS.get(current_persona, PERSONAS["default"])
             
             try:
-                if bot.active_brain == "groq":
+                if current_brain == "groq":
                     history = await get_memory(str(message.author.id), "groq")
                     messages = [{"role": "system", "content": current_system_prompt}]
                     messages.extend(history)
@@ -220,7 +252,7 @@ async def on_message(message):
                 await message.channel.send(response_text[:2000])
                 
             except Exception as e:
-                await message.channel.send(f"I'm having trouble thinking right now. ({bot.active_brain.upper()} failed)")
-                print(f"Error ({bot.active_brain}): {e}")
+                await message.channel.send(f"I'm having trouble thinking right now. ({current_brain.upper()} failed)")
+                print(f"Error ({current_brain}): {e}")
 
 bot.run(os.getenv("DISCORD_TOKEN"))

@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en" class="no-js">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LARVIS // CORE SYSTEM</title>
+  
+  <!-- Fonts: Technical Monospace, Y2K Extended Display, and Dense Sans -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Michroma&family=Space+Mono:ital,wght@0,400;0,700;1,400;1,700&family=Syncopate:wght@400;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+  
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="loading">
+
+  <!-- OVERLAYS: Grain, Scanlines, Global Crosshairs -->
+  <div class="noise-overlay" aria-hidden="true"></div>
+  <div class="scanlines-overlay" aria-hidden="true"></div>
+  <div class="vignette-overlay" aria-hidden="true"></div>
+  
+  <div class="custom-cursor" id="custom-cursor">
+    <div class="cursor-crosshair x"></div>
+    <div class="cursor-crosshair y"></div>
+    <div class="cursor-box"></div>
+  </div>
+
+  <!-- FIXED HUD ELEMENTS -->
+  <header class="hud-header">
+    <div class="hud-col left">
+      <span class="hud-text scramble">SYS.V2.0.4</span>
+      <span class="hud-text">COORD: <span id="mouse-coord">000, 000</span></span>
+    </div>
+    <div class="hud-col center">
+      <div class="hud-logo">
+        <span class="bracket">[</span>
+        <span class="logo-text">L.A.R.V.I.S</span>
+        <span class="bracket">]</span>
+      </div>
+    </div>
+    <div class="hud-col right">
+      <span class="hud-text scramble" id="time-display">00:00:00:00</span>
+      <span class="hud-status"><span class="status-dot"></span> ONLINE</span>
+    </div>
+  </header>
+
+  <div class="hud-borders">
+    <div class="border-t"></div>
+    <div class="border-b"></div>
+    <div class="border-l"></div>
+    <div class="border-r"></div>
+    <div class="corner-tl"></div>
+    <div class="corner-tr"></div>
+    <div class="corner-bl"></div>
+    <div class="corner-br"></div>
+  </div>
+
+  <div class="hud-progress-bar">
+    <div class="hud-progress-fill" id="scroll-progress"></div>
+  </div>
+
+  <!-- MAIN SCROLL CONTAINER -->
+  <main id="smooth-wrapper">
+    <div id="smooth-content">
+
+      <!-- ===================== HERO EDITORIAL ===================== -->
+      <section class="sec-hero">
+        <div class="hero-grid-bg"></div>
+        
+        <div class="hero-image-wrapper" data-parallax="0.2">
+          <!-- THE REQUESTED IMAGE -->
+          <img src="larvis.jpg" alt="Larvis System Interface" class="hero-img">
+          <div class="image-tech-overlay">
+            <div class="overlay-ring"></div>
+            <div class="overlay-cross x"></div>
+            <div class="overlay-cross y"></div>
+            <div class="overlay-data">
+              <span>TRGT_LOCK: TRUE</span>
+              <span>SCN_RT: 120HZ</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="hero-typography">
+          <div class="hero-title-block">
+            <h1 class="hero-title">
+              <span class="title-line clip-text">AUTONOMOUS</span>
+              <span class="title-line clip-text stroke-text">DISCORD</span>
+              <span class="title-line clip-text">INTELLIGENCE</span>
+            </h1>
+          </div>
+          <div class="hero-meta">
+            <div class="meta-item">
+              <span class="meta-label">MODEL</span>
+              <span class="meta-val scramble">J.A.R.V.I.S_EMU</span>
+            </div>
+            <div class="meta-item">
+              <span class="meta-label">BRAIN_ARCH</span>
+              <span class="meta-val scramble">GROQ // GEMINI</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="scroll-down-indicator">
+          <span class="vert-text scramble">INITIALIZE SCROLL</span>
+          <div class="vert-line"></div>
+        </div>
+      </section>
+
+      <!-- ===================== MARQUEE TRANSITION ===================== -->
+      <section class="sec-marquee">
+        <div class="marquee-inner">
+          <span class="marquee-text">NO PREFIX REQUIRED /// DUAL BRAIN ARCHITECTURE /// BRITISH NEURAL SYNTHESIS /// </span>
+          <span class="marquee-text">NO PREFIX REQUIRED /// DUAL BRAIN ARCHITECTURE /// BRITISH NEURAL SYNTHESIS /// </span>
+          <span class="marquee-text">NO PREFIX REQUIRED /// DUAL BRAIN ARCHITECTURE /// BRITISH NEURAL SYNTHESIS /// </span>
+        </div>
+      </section>
+
+      <!-- ===================== SYSTEM OVERVIEW (ASYMMETRIC) ===================== -->
+      <section class="sec-overview">
+        <div class="overview-layout">
+          <div class="col-left">
+            <div class="sys-label">
+              <span class="scramble">SYS_INFO_01</span>
+              <div class="line"></div>
+            </div>
+            <h2 class="section-title clip-text">THE JARVIS <br> PROTOCOL.</h2>
+            <div class="technical-readout panel-chamfer">
+              <div class="readout-header">EXEC_BOOT.SH</div>
+              <div class="readout-body">
+                <p>> ROUTING: GROQ (GPT-OSS-20B) ... <span class="c-cyan">LIVE</span></p>
+                <p>> VISION: GEMINI-3.6-FLASH ... <span class="c-cyan">LIVE</span></p>
+                <p>> VOICE: EN-GB-RYANNEURAL ... <span class="c-cyan">READY</span></p>
+                <p>> MEMORY: SQLITE_PERSIST ... <span class="c-cyan">LOADED</span></p>
+                <p class="blink">> WAITING FOR INPUT_</p>
+              </div>
+            </div>
+          </div>
+          
+          <div class="col-right">
+            <div class="editorial-text">
+              <p>
+                Built for operators who demand more than generic bots. 
+                Larvis routes between two distinct AI engines in real time, 
+                synthesizes speech with a crisp British neural voice, and maintains 
+                independent per-server memory — <span class="highlight">all without a single command prefix.</span>
+              </p>
+              <p>
+                Inspired by MCU control systems, retaining dry wit, polite 
+                professionalism, and mild exasperation at human decisions.
+              </p>
+            </div>
+            <div class="action-block">
+              <a href="https://discord.com/oauth2/authorize?client_id=1551820038510477322" class="btn-cyber">
+                <span class="btn-text">INITIATE DEPLOYMENT</span>
+                <span class="btn-decor"></span>
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================== CAPABILITIES (GRID / EXPERIMENTAL) ===================== -->
+      <section class="sec-matrix">
+        <div class="matrix-header">
+          <h2 class="section-title clip-text">CAPABILITY <br> MATRIX</h2>
+          <span class="tech-tag">OP_MODES: 08</span>
+        </div>
+
+        <div class="matrix-grid">
+          <!-- Items injected via JS for cleaner HTML structure, or written out -->
+          <div class="matrix-item panel-chamfer" data-speed="0.9">
+            <div class="item-id">01</div>
+            <h3>DUAL-BRAIN ARCHITECTURE</h3>
+            <p>Routes instantly between Groq for speed and Gemini for deep analysis.</p>
+            <div class="item-meter"><div class="fill" style="width: 95%"></div></div>
+          </div>
+
+          <div class="matrix-item panel-chamfer" data-speed="1.1">
+            <div class="item-id">02</div>
+            <h3>SMART AUTO-VISION</h3>
+            <p>Drop an image, mention Larvis. Auto-routes to Gemini Vision natively.</p>
+            <div class="item-meter"><div class="fill" style="width: 88%"></div></div>
+          </div>
+
+          <div class="matrix-item panel-chamfer" data-speed="0.95">
+            <div class="item-id">03</div>
+            <h3>LIVE WEB SCRAPE</h3>
+            <p>Integrated DuckDuckGo scraping for real-time data and news summarization.</p>
+            <div class="item-meter"><div class="fill" style="width: 75%"></div></div>
+          </div>
+
+          <div class="matrix-item panel-chamfer" data-speed="1.15">
+            <div class="item-id">04</div>
+            <h3>PER-SERVER AUTONOMY</h3>
+            <p>SQLite persistent memory tracking independent conversation histories.</p>
+            <div class="item-meter"><div class="fill" style="width: 100%"></div></div>
+          </div>
+
+          <div class="matrix-item panel-chamfer" data-speed="0.85">
+            <div class="item-id">05</div>
+            <h3>AI ART GEN</h3>
+            <p>Pollinations.ai integration for Flux, Midjourney, and Anime generation.</p>
+            <div class="item-meter"><div class="fill" style="width: 60%"></div></div>
+          </div>
+
+          <div class="matrix-item panel-chamfer" data-speed="1.05">
+            <div class="item-id">06</div>
+            <h3>DYNAMIC PERSONAS</h3>
+            <p>Shift between J.A.R.V.I.S, Expert, Storyteller, Concise, or Sarcastic.</p>
+            <div class="item-meter"><div class="fill" style="width: 80%"></div></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================== VOICE (AUDIO VIZ AESTHETIC) ===================== -->
+      <section class="sec-voice">
+        <div class="voice-container panel-chamfer">
+          <div class="voice-data-left">
+            <div class="sys-label">
+              <span class="scramble">AUDIO_SYS_03</span>
+            </div>
+            <h2 class="section-title">NEURAL <br> SYNTHESIS</h2>
+            <div class="specs-list">
+              <div class="spec-row"><span>ENGINE</span><span>EDGE-TTS</span></div>
+              <div class="spec-row"><span>MODEL</span><span>EN-GB-RYANNEURAL</span></div>
+              <div class="spec-row"><span>ENCRYPT</span><span>PYNACL</span></div>
+            </div>
+          </div>
+          
+          <div class="voice-visualizer">
+            <div class="viz-canvas" id="audio-viz">
+              <!-- JS generates wave lines -->
+            </div>
+            <div class="viz-overlay-ring"></div>
+            <div class="viz-labels">
+              <span>FREQ: 44.1KHZ</span>
+              <span>STATE: ACTIVE</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================== COMMANDS (TERMINAL TABLE) ===================== -->
+      <section class="sec-commands">
+        <div class="cmd-header">
+          <h2 class="section-title clip-text">INTERFACE <br> DIRECTIVES</h2>
+        </div>
+        
+        <div class="cmd-table">
+          <div class="cmd-row head">
+            <div class="cmd-cell">CMD</div>
+            <div class="cmd-cell">SYS_MOD</div>
+            <div class="cmd-cell">FUNCTION</div>
+          </div>
+          <div class="cmd-row">
+            <div class="cmd-cell highlight">/setbrain</div>
+            <div class="cmd-cell">CORE</div>
+            <div class="cmd-cell">Toggle processing engine [groq/gemini]</div>
+          </div>
+          <div class="cmd-row">
+            <div class="cmd-cell highlight">/setpersona</div>
+            <div class="cmd-cell">BEHAVIOR</div>
+            <div class="cmd-cell">Modify active neural personality construct</div>
+          </div>
+          <div class="cmd-row">
+            <div class="cmd-cell highlight">/speak</div>
+            <div class="cmd-cell">AUDIO</div>
+            <div class="cmd-cell">Establish VC link and initiate vocal playback</div>
+          </div>
+          <div class="cmd-row">
+            <div class="cmd-cell highlight">/imagine</div>
+            <div class="cmd-cell">RENDER</div>
+            <div class="cmd-cell">Generate 1024x1024 visual output via Pollinations</div>
+          </div>
+          <div class="cmd-row">
+            <div class="cmd-cell highlight">/clear</div>
+            <div class="cmd-cell">MEMORY</div>
+            <div class="cmd-cell">Purge localized server conversation cache</div>
+          </div>
+          <div class="cmd-row special">
+            <div class="cmd-cell highlight">larvis...</div>
+            <div class="cmd-cell">NLP</div>
+            <div class="cmd-cell">Natural language trigger. No prefix required.</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===================== FOOTER / DEPLOY ===================== -->
+      <footer class="sec-footer">
+        <div class="footer-content">
+          <h2 class="footer-title scramble">END_OF_LINE</h2>
+          <div class="footer-actions">
+            <a href="https://discord.com/oauth2/authorize?client_id=1551820038510477322" target="_blank" class="btn-cyber large">
+              <span class="btn-text">AUTHORIZE LARVIS</span>
+              <span class="btn-decor"></span>
+            </a>
+            <a href="https://github.com/Piyushowo/Larvis_Discord_Bot" target="_blank" class="btn-text-link">
+              [ ACCESS_SOURCE_CODE ]
+            </a>
+          </div>
+          
+          <div class="footer-bottom">
+            <span>(C) 2025 // PIYUSHOWO</span>
+            <span>OPEN_SOURCE_INITIATIVE</span>
+          </div>
+        </div>
+      </footer>
+
+    </div> <!-- /smooth-content -->
+  </main> <!-- /smooth-wrapper -->
+
+  <!-- Scripts: GSAP, ScrollTrigger, Lenis, Custom JS -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/gsap.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.2/ScrollTrigger.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/gh/studio-freight/lenis@1.0.19/bundled/lenis.min.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>

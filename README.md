@@ -4,6 +4,7 @@ Larvis is a high-performance, production-ready Discord companion modeled after t
 
 <img width="1254" height="1254" alt="ChatGPT Image Sep 24, 2026, 04_33_42 PM" src="https://github.com/user-attachments/assets/734ae33d-999b-4348-a1e7-9b5ff68d632f" />
 
+<img width="1024" height="1024" alt="LARVIS PFP MAIN" src="https://github.com/user-attachments/assets/8f4a3900-12aa-4022-aec2-dae79cec3eff" />
 
 **Core Features**
 

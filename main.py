@@ -1,5 +1,6 @@
-import discord, os, sqlite3, urllib.parse, asyncio, io, aiohttp, re, base64
-from discord.ext import commands
+import discord, os, sqlite3, urllib.parse, asyncio, io, aiohttp, re, base64, time
+from datetime import datetime, timedelta
+from discord.ext import commands, tasks
 from google import genai
 from google.genai import types
 from groq import AsyncGroq
@@ -42,7 +43,39 @@ PERSONAS = {
 db = sqlite3.connect("memory.db", check_same_thread=False)
 db.execute("CREATE TABLE IF NOT EXISTS history (user_id TEXT, role TEXT, content TEXT)")
 db.execute("CREATE TABLE IF NOT EXISTS guild_settings (guild_id TEXT PRIMARY KEY, active_brain TEXT, active_persona TEXT)")
+db.execute("""
+CREATE TABLE IF NOT EXISTS reminders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id TEXT,
+    channel_id TEXT,
+    guild_id TEXT,
+    reminder_text TEXT,
+    remind_at INTEGER
+)
+""")
 db_lock = asyncio.Lock()
+
+# --- Time Parser Helper ---
+def parse_time(time_str: str) -> int:
+    """Converts strings like '10m', '2h', '1d' into a future Unix timestamp."""
+    unit = time_str[-1].lower()
+    if unit not in ['s', 'm', 'h', 'd']:
+        return None
+    try:
+        val = int(time_str[:-1])
+    except ValueError:
+        return None
+
+    now = int(time.time())
+    if unit == 's':
+        return now + val
+    elif unit == 'm':
+        return now + (val * 60)
+    elif unit == 'h':
+        return now + (val * 3600)
+    elif unit == 'd':
+        return now + (val * 86400)
+    return None
 
 # --- Database Helper Functions ---
 async def get_guild_settings(guild_id):
@@ -119,9 +152,38 @@ async def speak_text(guild, text):
         audio_source = discord.FFmpegPCMAudio(file_path)
         guild.voice_client.play(audio_source)
 
+# --- Background Task Loop for Reminders ---
+@tasks.loop(seconds=15)
+async def check_reminders():
+    now = int(time.time())
+    async with db_lock:
+        cursor = db.execute(
+            "SELECT id, user_id, channel_id, guild_id, reminder_text FROM reminders WHERE remind_at <= ?",
+            (now,)
+        )
+        due = cursor.fetchall()
+        
+        if due:
+            db.execute("DELETE FROM reminders WHERE remind_at <= ?", (now,))
+            db.commit()
+
+    for rem_id, user_id, channel_id, guild_id, text in due:
+        channel = bot.get_channel(int(channel_id))
+        if channel:
+            alert_msg = f"⏰ <@{user_id}> **Sir, system alert protocol triggered:** {text}"
+            await channel.send(
+                content=alert_msg,
+                allowed_mentions=discord.AllowedMentions(users=True)
+            )
+            
+            guild = bot.get_guild(int(guild_id)) if guild_id else None
+            if guild and guild.voice_client:
+                await speak_text(guild, f"Sir, reminder alert: {text}")
 
 @bot.event
 async def on_ready():
+    if not check_reminders.is_running():
+        check_reminders.start()
     try:
         synced = await bot.tree.sync()
         print(f"Synced {len(synced)} slash command(s).")
@@ -145,6 +207,7 @@ async def slash_help(interaction: discord.Interaction):
         color=discord.Color.blurple()
     )
     embed.add_field(name="💬 Chat", value="Mention `@Larvis` or type `larvis`", inline=False)
+    embed.add_field(name="⏰ Reminders", value="`/remind <time> <note> [user]` | `/reminders`", inline=False)
     embed.add_field(name="🌐 Live Search", value="`/search <query>` to access the live internet.", inline=False)
     embed.add_field(name="🎙️ Voice", value="`/join` to bring me to your VC, `/leave` to dismiss me.", inline=False)
     embed.add_field(name="🧠 Brain", value="`/brain <groq | gemini>`", inline=False)
@@ -154,20 +217,70 @@ async def slash_help(interaction: discord.Interaction):
     embed.set_footer(text=f"Server Brain: {settings['brain'].upper()} | Persona: {settings['persona'].upper()}")
     await interaction.response.send_message(embed=embed)
 
+@bot.tree.command(name="remind", description="Set a timer or reminder protocol.")
+async def slash_remind(
+    interaction: discord.Interaction, 
+    time_in: str, 
+    note: str, 
+    target_user: discord.User = None
+):
+    remind_time = parse_time(time_in)
+    if not remind_time:
+        await interaction.response.send_message(
+            "❌ **Invalid format, sir.** Please use formats like `10m` (10 minutes), `2h` (2 hours), or `1d` (1 day).", 
+            ephemeral=True
+        )
+        return
+
+    user_to_ping = target_user or interaction.user
+    user_id = str(user_to_ping.id)
+    channel_id = str(interaction.channel_id)
+    guild_id = str(interaction.guild_id) if interaction.guild else ""
+
+    async with db_lock:
+        db.execute(
+            "INSERT INTO reminders (user_id, channel_id, guild_id, reminder_text, remind_at) VALUES (?, ?, ?, ?, ?)",
+            (user_id, channel_id, guild_id, note, remind_time)
+        )
+        db.commit()
+
+    time_formatted = f"<t:{remind_time}:R>"
+    await interaction.response.send_message(
+        f"⏰ **Reminder Protocol Locked.** I shall alert <@{user_id}> regarding *'{note}'* {time_formatted}, sir.",
+        allowed_mentions=discord.AllowedMentions(users=True)
+    )
+
+@bot.tree.command(name="reminders", description="List your currently active reminders.")
+async def slash_list_reminders(interaction: discord.Interaction):
+    user_id = str(interaction.user.id)
+    async with db_lock:
+        cursor = db.execute(
+            "SELECT id, reminder_text, remind_at FROM reminders WHERE user_id=? ORDER BY remind_at ASC", 
+            (user_id,)
+        )
+        rows = cursor.fetchall()
+
+    if not rows:
+        await interaction.response.send_message("You have no active scheduled reminder protocols, sir.")
+        return
+
+    output = "**⏰ Active System Reminders:**\n"
+    for rem_id, text, remind_at in rows:
+        output += f"• `{rem_id}`: *{text}* — <t:{remind_at}:R>\n"
+    
+    await interaction.response.send_message(output, ephemeral=True)
+
 @bot.tree.command(name="search", description="Access the global network for real-time information.")
 async def slash_search(interaction: discord.Interaction, query: str):
     await interaction.response.defer()
     
-    # 1. Fetch web results in a separate thread so the bot doesn't freeze
     web_data = await asyncio.to_thread(perform_web_search, query)
     
-    # 2. Get server settings
     target_id = interaction.guild_id or interaction.user.id
     settings = await get_guild_settings(target_id)
     current_brain = settings["brain"]
     current_persona = settings["persona"]
     
-    # 3. Formulate the prompt instructing Larvis to use the web data
     system_prompt = PERSONAS.get(current_persona, PERSONAS["default"])
     search_prompt = (
         f"The user has requested a live network search for: '{query}'.\n"
@@ -193,13 +306,11 @@ async def slash_search(interaction: discord.Interaction, query: str):
             )
             response_text = response.text
 
-        # 4. Save to memory so Larvis remembers the search context in normal chat later
         await save_memory(str(interaction.user.id), "user", f"Search for: {query}")
         await save_memory(str(interaction.user.id), "bot", response_text)
         
         await interaction.followup.send(response_text[:2000])
         
-        # 5. Speak response if in Voice Channel
         if interaction.guild and interaction.guild.voice_client:
             await speak_text(interaction.guild, response_text)
             
@@ -297,10 +408,7 @@ async def on_message(message):
         if any(attachment.filename.lower().endswith(ext) for ext in ['png', 'jpg', 'jpeg', 'webp']):
             async with message.channel.typing():
                 try:
-                    # 1. Read bytes directly (No PIL needed)
                     image_bytes = await attachment.read()
-                    
-                    # 2. Package it safely for Gemini to avoid the ResourceWarning
                     image_part = types.Part.from_bytes(
                         data=image_bytes, 
                         mime_type=attachment.content_type or "image/jpeg"
@@ -312,7 +420,6 @@ async def on_message(message):
 
                     current_system_prompt = PERSONAS.get(current_persona, PERSONAS["default"])
                     
-                    # 3. Use the correct, stable vision model name
                     response = await gemini_client.aio.models.generate_content(
                         model='gemini-3.6-flash',
                         contents=[prompt, image_part],

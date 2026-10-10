@@ -7,7 +7,9 @@ from groq import AsyncGroq
 from dotenv import load_dotenv
 import edge_tts
 from duckduckgo_search import DDGS
-from PIL import Image, ImageEnhance
+from PIL import Image, ImageEnhance, ImageFilter, ImageOps, ImageDraw, ImageFont
+import numpy as np
+from rembg import remove
 
 # 1. Load Secrets
 load_dotenv()
@@ -81,25 +83,54 @@ def parse_time(time_str: str) -> int:
 # --- Image Processing Helper ---
 def process_image_edit(image_bytes: bytes, edits: dict) -> bytes:
     """
-    Applies standard gallery edits entirely in memory.
+    Applies deterministic transformations, grain, bg removal, and text overlays in memory.
     """
-    img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
-    
-    if "brightness" in edits:
-        enhancer = ImageEnhance.Brightness(img)
-        img = enhancer.enhance(edits["brightness"])
+    if edits.get("remove_bg"):
+        image_bytes = remove(image_bytes)
         
-    if "contrast" in edits:
-        enhancer = ImageEnhance.Contrast(img)
-        img = enhancer.enhance(edits["contrast"])
+    img = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
+
+    if "brightness" in edits and edits["brightness"] != 1.0:
+        img = ImageEnhance.Brightness(img).enhance(edits["brightness"])
+    if "contrast" in edits and edits["contrast"] != 1.0:
+        img = ImageEnhance.Contrast(img).enhance(edits["contrast"])
+    if "saturation" in edits and edits["saturation"] != 1.0:
+        img = ImageEnhance.Color(img).enhance(edits["saturation"])
+
+    if "grain" in edits and edits["grain"] > 0:
+        intensity = edits["grain"] * 50 
+        img_arr = np.array(img).astype(np.float32)
+        noise = np.random.normal(0, intensity, (img_arr.shape[0], img_arr.shape[1], 3))
+        img_arr[:, :, :3] = np.clip(img_arr[:, :, :3] + noise, 0, 255)
+        img = Image.fromarray(img_arr.astype(np.uint8), "RGBA")
+
+    if "filter" in edits and edits["filter"]:
+        f = edits["filter"].lower()
+        if f == "blur":
+            img = img.filter(ImageFilter.GaussianBlur(radius=3))
+        elif f == "contour":
+            img = img.filter(ImageFilter.CONTOUR)
+        elif f == "emboss":
+            img = img.filter(ImageFilter.EMBOSS)
+        elif f == "edges":
+            img = img.filter(ImageFilter.FIND_EDGES)
+
+    if "caption" in edits and edits["caption"]:
+        draw = ImageDraw.Draw(img)
+        try:
+            font = ImageFont.truetype("impact.ttf", int(img.height / 10))
+        except IOError:
+            font = ImageFont.load_default()
+
+        text = edits["caption"].upper()
+        bbox = draw.textbbox((0, 0), text, font=font)
+        text_width = bbox[2] - bbox[0]
+        text_height = bbox[3] - bbox[1]
         
-    if "saturation" in edits:
-        enhancer = ImageEnhance.Color(img)
-        img = enhancer.enhance(edits["saturation"])
-        
-    if "sharpness" in edits:
-        enhancer = ImageEnhance.Sharpness(img)
-        img = enhancer.enhance(edits["sharpness"])
+        x = (img.width - text_width) / 2
+        y = img.height - text_height - (img.height * 0.05) 
+
+        draw.text((x, y), text, font=font, fill="white", stroke_width=3, stroke_fill="black")
 
     output_buffer = io.BytesIO()
     img.save(output_buffer, format="PNG")
@@ -238,7 +269,7 @@ async def slash_help(interaction: discord.Interaction):
     )
     embed.add_field(name="💬 Chat", value="Mention `@Larvis` or type `larvis`", inline=False)
     embed.add_field(name="⏰ Reminders", value="`/remind <time> <note> [user]` | `/reminders`", inline=False)
-    embed.add_field(name="🖼️ Edit Image", value="`/edit <image> [brightness] [contrast]...`", inline=False)
+    embed.add_field(name="🖼️ Edit Image", value="`/edit <image> [options]`", inline=False)
     embed.add_field(name="🌐 Live Search", value="`/search <query>` to access the live internet.", inline=False)
     embed.add_field(name="🎙️ Voice", value="`/join` to bring me to your VC, `/leave` to dismiss me.", inline=False)
     embed.add_field(name="🧠 Brain", value="`/brain <groq | gemini>`", inline=False)
@@ -248,14 +279,24 @@ async def slash_help(interaction: discord.Interaction):
     embed.set_footer(text=f"Server Brain: {settings['brain'].upper()} | Persona: {settings['persona'].upper()}")
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="edit", description="Programmatically edit an image's brightness, contrast, saturation, or sharpness.")
+@bot.tree.command(name="edit", description="Programmatic image manipulation suite.")
+@discord.app_commands.choices(image_filter=[
+    discord.app_commands.Choice(name="None", value="none"),
+    discord.app_commands.Choice(name="Gaussian Blur", value="blur"),
+    discord.app_commands.Choice(name="Contour Lines", value="contour"),
+    discord.app_commands.Choice(name="Emboss", value="emboss"),
+    discord.app_commands.Choice(name="Find Edges", value="edges")
+])
 async def slash_edit(
     interaction: discord.Interaction, 
     attachment: discord.Attachment,
+    remove_background: bool = False,
+    caption: str = None,
+    grain: float = 0.0,
     brightness: float = 1.0,
     contrast: float = 1.0,
     saturation: float = 1.0,
-    sharpness: float = 1.0
+    image_filter: str = "none"
 ):
     if not any(attachment.filename.lower().endswith(ext) for ext in ['png', 'jpg', 'jpeg', 'webp']):
         await interaction.response.send_message("❌ **Invalid format, Sir.** Please upload a standard image file.", ephemeral=True)
@@ -267,16 +308,19 @@ async def slash_edit(
         image_bytes = await attachment.read()
         
         edits = {
+            "remove_bg": remove_background,
+            "caption": caption,
+            "grain": grain,
             "brightness": brightness,
             "contrast": contrast,
             "saturation": saturation,
-            "sharpness": sharpness
+            "filter": image_filter if image_filter != "none" else None
         }
         
         edited_bytes = await asyncio.to_thread(process_image_edit, image_bytes, edits)
         
-        edited_file = discord.File(io.BytesIO(edited_bytes), filename="larvis_edit.png")
-        await interaction.followup.send(content="**Image processing complete, Sir.**", file=edited_file)
+        edited_file = discord.File(io.BytesIO(edited_bytes), filename="larvis_studio.png")
+        await interaction.followup.send(content="**Visual manipulation complete, Sir.**", file=edited_file)
         
     except Exception as e:
         await interaction.followup.send(f"❌ **System Error:** Failed to process image matrix. Log: {e}")

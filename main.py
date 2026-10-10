@@ -7,6 +7,7 @@ from groq import AsyncGroq
 from dotenv import load_dotenv
 import edge_tts
 from duckduckgo_search import DDGS
+from PIL import Image, ImageEnhance
 
 # 1. Load Secrets
 load_dotenv()
@@ -76,6 +77,35 @@ def parse_time(time_str: str) -> int:
     elif unit == 'd':
         return now + (val * 86400)
     return None
+
+# --- Image Processing Helper ---
+def process_image_edit(image_bytes: bytes, edits: dict) -> bytes:
+    """
+    Applies standard gallery edits entirely in memory.
+    """
+    img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    
+    if "brightness" in edits:
+        enhancer = ImageEnhance.Brightness(img)
+        img = enhancer.enhance(edits["brightness"])
+        
+    if "contrast" in edits:
+        enhancer = ImageEnhance.Contrast(img)
+        img = enhancer.enhance(edits["contrast"])
+        
+    if "saturation" in edits:
+        enhancer = ImageEnhance.Color(img)
+        img = enhancer.enhance(edits["saturation"])
+        
+    if "sharpness" in edits:
+        enhancer = ImageEnhance.Sharpness(img)
+        img = enhancer.enhance(edits["sharpness"])
+
+    output_buffer = io.BytesIO()
+    img.save(output_buffer, format="PNG")
+    output_buffer.seek(0)
+    
+    return output_buffer.getvalue()
 
 # --- Database Helper Functions ---
 async def get_guild_settings(guild_id):
@@ -208,6 +238,7 @@ async def slash_help(interaction: discord.Interaction):
     )
     embed.add_field(name="💬 Chat", value="Mention `@Larvis` or type `larvis`", inline=False)
     embed.add_field(name="⏰ Reminders", value="`/remind <time> <note> [user]` | `/reminders`", inline=False)
+    embed.add_field(name="🖼️ Edit Image", value="`/edit <image> [brightness] [contrast]...`", inline=False)
     embed.add_field(name="🌐 Live Search", value="`/search <query>` to access the live internet.", inline=False)
     embed.add_field(name="🎙️ Voice", value="`/join` to bring me to your VC, `/leave` to dismiss me.", inline=False)
     embed.add_field(name="🧠 Brain", value="`/brain <groq | gemini>`", inline=False)
@@ -216,6 +247,39 @@ async def slash_help(interaction: discord.Interaction):
     
     embed.set_footer(text=f"Server Brain: {settings['brain'].upper()} | Persona: {settings['persona'].upper()}")
     await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="edit", description="Programmatically edit an image's brightness, contrast, saturation, or sharpness.")
+async def slash_edit(
+    interaction: discord.Interaction, 
+    attachment: discord.Attachment,
+    brightness: float = 1.0,
+    contrast: float = 1.0,
+    saturation: float = 1.0,
+    sharpness: float = 1.0
+):
+    if not any(attachment.filename.lower().endswith(ext) for ext in ['png', 'jpg', 'jpeg', 'webp']):
+        await interaction.response.send_message("❌ **Invalid format, Sir.** Please upload a standard image file.", ephemeral=True)
+        return
+
+    await interaction.response.defer()
+
+    try:
+        image_bytes = await attachment.read()
+        
+        edits = {
+            "brightness": brightness,
+            "contrast": contrast,
+            "saturation": saturation,
+            "sharpness": sharpness
+        }
+        
+        edited_bytes = await asyncio.to_thread(process_image_edit, image_bytes, edits)
+        
+        edited_file = discord.File(io.BytesIO(edited_bytes), filename="larvis_edit.png")
+        await interaction.followup.send(content="**Image processing complete, Sir.**", file=edited_file)
+        
+    except Exception as e:
+        await interaction.followup.send(f"❌ **System Error:** Failed to process image matrix. Log: {e}")
 
 @bot.tree.command(name="remind", description="Set a timer or reminder protocol.")
 async def slash_remind(

@@ -7,3 +7,5 @@ Pillow
 PyNaCl
 edge-tts
 duckduckgo-search
+numpy
+rembg

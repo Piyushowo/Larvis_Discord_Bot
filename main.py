@@ -8,8 +8,6 @@ from dotenv import load_dotenv
 import edge_tts
 from duckduckgo_search import DDGS
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps, ImageDraw, ImageFont
-import numpy as np
-from rembg import remove
 
 # 1. Load Secrets
 load_dotenv()
@@ -103,11 +101,8 @@ def parse_time(time_str: str) -> int:
 # --- Image Processing Helper ---
 def process_image_edit(image_bytes: bytes, edits: dict) -> bytes:
     """
-    Applies deterministic transformations, grain, bg removal, and text overlays in memory.
+    Applies deterministic transformations and text overlays in memory.
     """
-    if edits.get("remove_bg"):
-        image_bytes = remove(image_bytes)
-        
     img = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
 
     if "brightness" in edits and edits["brightness"] != 1.0:
@@ -116,13 +111,6 @@ def process_image_edit(image_bytes: bytes, edits: dict) -> bytes:
         img = ImageEnhance.Contrast(img).enhance(edits["contrast"])
     if "saturation" in edits and edits["saturation"] != 1.0:
         img = ImageEnhance.Color(img).enhance(edits["saturation"])
-
-    if "grain" in edits and edits["grain"] > 0:
-        intensity = edits["grain"] * 50 
-        img_arr = np.array(img).astype(np.float32)
-        noise = np.random.normal(0, intensity, (img_arr.shape[0], img_arr.shape[1], 3))
-        img_arr[:, :, :3] = np.clip(img_arr[:, :, :3] + noise, 0, 255)
-        img = Image.fromarray(img_arr.astype(np.uint8), "RGBA")
 
     if "filter" in edits and edits["filter"]:
         f = edits["filter"].lower()
@@ -392,9 +380,7 @@ async def slash_analyze(
 async def slash_edit(
     interaction: discord.Interaction, 
     attachment: discord.Attachment,
-    remove_background: bool = False,
     caption: str = None,
-    grain: float = 0.0,
     brightness: float = 1.0,
     contrast: float = 1.0,
     saturation: float = 1.0,
@@ -410,9 +396,7 @@ async def slash_edit(
         image_bytes = await attachment.read()
         
         edits = {
-            "remove_bg": remove_background,
             "caption": caption,
-            "grain": grain,
             "brightness": brightness,
             "contrast": contrast,
             "saturation": saturation,

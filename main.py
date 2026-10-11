@@ -239,6 +239,7 @@ async def slash_help(interaction: discord.Interaction):
     embed.add_field(name="💬 Chat", value="Mention `@Larvis` or type `larvis`", inline=False)
     embed.add_field(name="⏰ Reminders", value="`/remind <time> <note> [user]` | `/reminders`", inline=False)
     embed.add_field(name="🖼️ Edit Image", value="`/edit <image> [brightness] [contrast]...`", inline=False)
+    embed.add_field(name="👁️ Analyze", value="`/analyze <image> [prompt]`", inline=False)
     embed.add_field(name="🌐 Live Search", value="`/search <query>` to access the live internet.", inline=False)
     embed.add_field(name="🎙️ Voice", value="`/join` to bring me to your VC, `/leave` to dismiss me.", inline=False)
     embed.add_field(name="🧠 Brain", value="`/brain <groq | gemini>`", inline=False)
@@ -247,6 +248,46 @@ async def slash_help(interaction: discord.Interaction):
     
     embed.set_footer(text=f"Server Brain: {settings['brain'].upper()} | Persona: {settings['persona'].upper()}")
     await interaction.response.send_message(embed=embed)
+
+@bot.tree.command(name="analyze", description="Run visual diagnostics on an uploaded image.")
+async def slash_analyze(
+    interaction: discord.Interaction, 
+    attachment: discord.Attachment, 
+    prompt: str = "Please run visual diagnostics and summarize the contents of this image."
+):
+    if not any(attachment.filename.lower().endswith(ext) for ext in ['png', 'jpg', 'jpeg', 'webp']):
+        await interaction.response.send_message("❌ **Invalid format, Sir.** Please upload a standard image file.", ephemeral=True)
+        return
+
+    await interaction.response.defer()
+
+    try:
+        target_id = interaction.guild_id or interaction.user.id
+        settings = await get_guild_settings(target_id)
+        current_persona = settings["persona"]
+        current_system_prompt = PERSONAS.get(current_persona, PERSONAS["default"])
+
+        image_bytes = await attachment.read()
+        image_part = types.Part.from_bytes(
+            data=image_bytes, 
+            mime_type=attachment.content_type or "image/jpeg"
+        )
+        
+        response = await gemini_client.aio.models.generate_content(
+            model='gemini-3.6-flash',
+            contents=[prompt, image_part],
+            config=types.GenerateContentConfig(
+                system_instruction=current_system_prompt
+            )
+        )
+        
+        await interaction.followup.send(response.text)
+        
+        if interaction.guild and interaction.guild.voice_client:
+            await speak_text(interaction.guild, response.text)
+            
+    except Exception as e:
+        await interaction.followup.send(f"❌ **Vision Error:** Failed to process visual data feed. Log: {e}")
 
 @bot.tree.command(name="edit", description="Programmatically edit an image's brightness, contrast, saturation, or sharpness.")
 async def slash_edit(
